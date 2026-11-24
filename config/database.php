@@ -1,7 +1,7 @@
 <?php
 // database.php
 $host = 'localhost';
-$banco = 'garagem-iot';
+$banco = 'garagem_iot';
 $user = 'root';
 $senha = '';
 
