@@ -1,3 +1,4 @@
+
 <?php
 session_start();
 require_once "../../config/database.php";
@@ -6,6 +7,101 @@ if (!isset($_SESSION["id_usuario"])) {
     header("Location: ../../auth/login.php");
     exit;
 }
+
+// Token de segurança
+if (empty($_SESSION["csrf_token"])) {
+    $_SESSION["csrf_token"] = bin2hex(random_bytes(32));
+}
+
+// Exclusão lógica do motorista
+if ($_SERVER["REQUEST_METHOD"] === "POST" && ($_POST["acao"] ?? "") === "excluir") {
+
+    if (
+        !isset($_POST["csrf_token"]) ||
+        !hash_equals($_SESSION["csrf_token"], $_POST["csrf_token"])
+    ) {
+        die("Requisição inválida.");
+    }
+
+    $idMotorista = (int) ($_POST["id_motorista"] ?? 0);
+
+    try {
+        $pdo->beginTransaction();
+
+        // Verifica se o motorista existe
+        $consulta = $pdo->prepare("
+            SELECT id_motorista
+            FROM motoristas
+            WHERE id_motorista = ?
+            FOR UPDATE
+        ");
+        $consulta->execute([$idMotorista]);
+
+        if (!$consulta->fetch()) {
+            throw new Exception("Motorista não encontrado.");
+        }
+
+        // Verifica se possui ocupação ativa
+        $consulta = $pdo->prepare("
+            SELECT id_ocupacao
+            FROM ocupacoes
+            WHERE id_motorista = ?
+            AND status = 'ATIVA'
+            LIMIT 1
+            FOR UPDATE
+        ");
+        $consulta->execute([$idMotorista]);
+
+        if ($consulta->fetch()) {
+            throw new Exception(
+                "Não é possível excluir um motorista com ocupação ativa."
+            );
+        }
+
+        // Desativa o motorista
+        $consulta = $pdo->prepare("
+            UPDATE motoristas
+            SET status = 0
+            WHERE id_motorista = ?
+        ");
+        $consulta->execute([$idMotorista]);
+
+        // Desativa o cartão RFID
+        $consulta = $pdo->prepare("
+            UPDATE credenciais_rfid
+            SET status = 0
+            WHERE id_motorista = ?
+        ");
+        $consulta->execute([$idMotorista]);
+
+        $pdo->commit();
+
+        $_SESSION["mensagem"] = "Motorista desativado com sucesso!";
+        $_SESSION["tipo_mensagem"] = "success";
+
+    } catch (Throwable $e) {
+
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        $_SESSION["mensagem"] = $e instanceof PDOException
+            ? "Erro ao desativar motorista."
+            : $e->getMessage();
+
+        $_SESSION["tipo_mensagem"] = "error";
+    }
+
+    $buscaAtual = $_GET["busca"] ?? "";
+    header("Location: index.php?busca=" . urlencode($buscaAtual));
+    exit;
+}
+
+// Mensagem de retorno
+$mensagem = $_SESSION["mensagem"] ?? "";
+$tipoMensagem = $_SESSION["tipo_mensagem"] ?? "";
+
+unset($_SESSION["mensagem"], $_SESSION["tipo_mensagem"]);
 
 // Pesquisa
 $busca = trim($_GET["busca"] ?? "");
@@ -65,6 +161,14 @@ $motoristas = $st->fetchAll(PDO::FETCH_ASSOC);
     </header>
 
     <main class="max-w-7xl mx-auto p-6">
+
+        <?php if ($mensagem !== ""): ?>
+            <div class="<?= $tipoMensagem === "success"
+                ? "bg-green-100 text-green-700"
+                : "bg-red-100 text-red-700" ?> p-3 rounded-lg text-sm mb-5">
+                <?= htmlspecialchars($mensagem) ?>
+            </div>
+        <?php endif; ?>
 
         <?php if (isset($_GET["cadastro"]) && $_GET["cadastro"] === "sucesso"): ?>
             <div class="bg-green-100 text-green-700 p-3 rounded-lg text-sm mb-5">
@@ -183,11 +287,37 @@ $motoristas = $st->fetchAll(PDO::FETCH_ASSOC);
                                     </td>
 
                                     <td class="p-3">
-                                        <a
-                                            href="editar.php?id=<?= (int) $motorista["id_motorista"] ?>"
-                                            class="text-blue-700 hover:underline font-semibold">
-                                            Editar
-                                        </a>
+                                        <div class="flex items-center gap-3">
+
+                                            <a
+                                                href="editar.php?id=<?= (int) $motorista["id_motorista"] ?>"
+                                                class="text-blue-700 hover:underline font-semibold">
+                                                Editar
+                                            </a>
+
+                                            <?php if ((int)$motorista["status"] === 1): ?>
+
+                                                <form method="POST"
+                                                    onsubmit="return confirm('Deseja realmente desativar este motorista?')">
+
+                                                    <input type="hidden" name="csrf_token"
+                                                        value="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
+
+                                                    <input type="hidden" name="acao" value="excluir">
+
+                                                    <input type="hidden" name="id_motorista"
+                                                        value="<?= (int)$motorista["id_motorista"] ?>">
+
+                                                    <button type="submit"
+                                                        class="text-red-600 hover:underline font-semibold">
+                                                        Excluir
+                                                    </button>
+
+                                                </form>
+
+                                            <?php endif; ?>
+
+                                        </div>
                                     </td>
 
                                 </tr>
