@@ -1,9 +1,9 @@
 <?php
 session_start();
-require_once "../../config/conexao.php";
+require_once "../../config/database.php";
 
 if (!isset($_SESSION["id_usuario"])) {
-    header("Location: ../../login.php");
+    header("Location: ../../auth/login.php");
     exit;
 }
 
@@ -208,7 +208,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 <p class="text-sm text-slate-400">Gerenciamento de motoristas</p>
             </div>
 
-            <a href="../../dashboard.php"
+            <a href="../dashboard.php"
                 class="text-sm bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg">
                 Dashboard
             </a>

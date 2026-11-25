@@ -3,7 +3,7 @@ session_start();
 require_once "../../config/database.php";
 
 if (!isset($_SESSION["id_usuario"])) {
-    header("Location: ../../login.php");
+    header("Location: ../../auth/login.php");
     exit;
 }
 
@@ -57,7 +57,7 @@ $motoristas = $st->fetchAll(PDO::FETCH_ASSOC);
                 <p class="text-sm text-slate-400">Gerenciamento de motoristas</p>
             </div>
 
-            <a href="../../dashboard.php"
+            <a href="../dashboard.php"
                 class="text-sm bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg">
                 Dashboard
             </a>
@@ -79,7 +79,7 @@ $motoristas = $st->fetchAll(PDO::FETCH_ASSOC);
                 <p class="text-sm text-gray-500">Gerencie os motoristas e seus cartões RFID.</p>
             </div>
 
-            <a href="cadastrar.php"
+            <a href="cadastro.php"
                 class="bg-slate-900 hover:bg-slate-800 text-white font-semibold px-5 py-2.5 rounded-lg text-center">
                 + Cadastrar motorista
             </a>
