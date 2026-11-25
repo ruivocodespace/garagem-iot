@@ -208,10 +208,10 @@ ON DELETE RESTRICT
 -- =====================================================
 
 INSERT INTO onibus (numero_frota, placa, modelo, status) VALUES
-('L1', AVG2I20, 'MARCOPOLO', 'ATIVO'),
-('L2', BNT6C10, 'MARCOPOLO', 'ATIVO'),
-('L3', RNM12G13,'MARCOPOLO', 'ATIVO'),
-('Centro', JKO2B30, 'VOLVO', 'ATIVO');
+('L1', 'AVG2I20', 'MARCOPOLO', 'ATIVO'),
+('L2', 'BNT6C10', 'MARCOPOLO', 'ATIVO'),
+('L3', 'RNM12G13','MARCOPOLO', 'ATIVO'),
+('Centro', 'JKO2B30', 'VOLVO', 'ATIVO');
 
 -- =====================================================
 -- CADASTRO INICIAL DOS QUATRO BOXES
