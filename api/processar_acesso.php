@@ -96,9 +96,9 @@ try {
     } else {
         $idMotorista = $motorista["id_motorista"];
 
-        if ($motorista["status_credencial"] !== "ATIVO") {
+        if ($motorista["status_credencial"] !== 1) {
             $motivo = "Credencial RFID inativa";
-        } elseif ($motorista["status_motorista"] !== "ATIVO") {
+        } elseif ($motorista["status_motorista"] !== 1) {
             $motivo = "Motorista inativo";
         } elseif (!$box) {
             $motivo = "Box não encontrado";

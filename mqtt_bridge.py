@@ -13,7 +13,7 @@ TOPIC_RFID = MQTT_ROOT + "/rfid"
 TOPIC_COMMAND = MQTT_ROOT + "/command"
 
 # ENDERECO DO PHP
-PHP_URL = "http://localhost:8080/GARAGEM-IOT/api/processar_acesso.php"
+PHP_URL = "http://localhost:8012/GARAGEM-IOT/api/processar_acesso.php"
 
 # CONEXAO MQTT
 def on_connect(client, userdata, flags, reason_code, properties):
