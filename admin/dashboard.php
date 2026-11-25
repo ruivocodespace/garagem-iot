@@ -113,7 +113,7 @@ $acessos = $pdo->query($sql_acessos)->fetchAll(PDO::FETCH_ASSOC);
 
     </header>
 
-    <main class="max-w-7xl mx-auto p-6">
+    <main id="dashboard-conteudo" class="max-w-7xl mx-auto p-6">
 
         <!-- Título -->
         <div class="mb-6 flex flex-wrap justify-between items-center gap-3">
@@ -124,7 +124,7 @@ $acessos = $pdo->query($sql_acessos)->fetchAll(PDO::FETCH_ASSOC);
                 </h2>
 
                 <p class="text-gray-500 text-sm">
-                    Visão geral da garagem
+                    Visão geral da garagem · Atualização automática a cada 5 segundos
                 </p>
             </div>
 
@@ -413,6 +413,27 @@ $acessos = $pdo->query($sql_acessos)->fetchAll(PDO::FETCH_ASSOC);
 
     </main>
 
+    <script>
+        async function atualizarDashboard() {
+            try {
+                if (!document.hidden) {
+                    const resposta = await fetch(window.location.href, { cache: 'no-store' });
+                    if (resposta.ok && !resposta.redirected) {
+                        const html = new DOMParser().parseFromString(await resposta.text(), 'text/html');
+                        const conteudo = html.getElementById('dashboard-conteudo');
+                        if (conteudo) {
+                            document.getElementById('dashboard-conteudo').innerHTML = conteudo.innerHTML;
+                        }
+                    }
+                }
+            } catch (erro) {
+                console.error('Erro ao atualizar dashboard:', erro);
+            } finally {
+                setTimeout(atualizarDashboard, 5000);
+            }
+        }
+        setTimeout(atualizarDashboard, 5000);
+    </script>
 </body>
 
 </html>
