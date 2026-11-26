@@ -1,0 +1,438 @@
+
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+#include <SPI.h>
+#include <MFRC522.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <ESP32Servo.h>
+
+// WIFI
+const char* WIFI_SSID = "Wokwi-GUEST";
+const char* WIFI_PASS = "";
+
+// MQTT
+const char* MQTT_SERVER = "broker.mqtt.cool";
+const int MQTT_PORT = 1883;
+const char* MQTT_ROOT = "mango/esp32c3/peterson";
+
+String TOPIC_TELEMETRY = String(MQTT_ROOT) + "/telemetry";
+String TOPIC_RFID = String(MQTT_ROOT) + "/rfid";
+String TOPIC_COMMAND = String(MQTT_ROOT) + "/command";
+
+WiFiClient espClient;
+PubSubClient mqtt(espClient);
+
+// PINOS
+#define SW1_PIN 6
+#define SW2_PIN 5
+#define SERVO1_PIN 10
+
+#define RFID_SS 0
+#define RFID_RST 4
+#define RFID_SCK 1
+#define RFID_MOSI 2
+#define RFID_MISO 3
+
+#define OLED_SDA 18
+#define OLED_SCL 19
+
+// COMPONENTES
+MFRC522 rfid(RFID_SS, RFID_RST);
+Servo servo1;
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_ADDR 0x3C
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// VARIAVEIS
+int sw1State = -1;
+int sw2State = -1;
+int servo1Angle = 0;
+
+unsigned long servoOpenAt = 0;
+bool servoAberto = false;
+
+String bootId;
+String lastRFID = "";
+String line1 = "ESP32-C3";
+String line2 = "INICIALIZANDO";
+String line3 = "AGUARDANDO";
+
+String pendingRequestId = "";
+unsigned long requestCounter = 0;
+
+unsigned long lastWifiAttempt = 0;
+unsigned long lastMqttAttempt = 0;
+
+bool oledReady = false;
+
+// IDENTIFICAR BOX
+String getSelectedBox() {
+  if (sw1State == HIGH && sw2State == HIGH) {
+    return "BOX 01";
+  }
+
+  if (sw1State == LOW && sw2State == HIGH) {
+    return "BOX 02";
+  }
+
+  if (sw1State == HIGH && sw2State == LOW) {
+    return "BOX 03";
+  }
+
+  return "BOX 04";
+}
+
+// DISPLAY
+void updateDisplay() {
+  if (!oledReady) return;
+
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+
+  display.setCursor(0, 5);
+  display.println(line1);
+
+  display.setCursor(0, 25);
+  display.println(line2);
+
+  display.setCursor(0, 45);
+  display.println(line3);
+
+  display.display();
+}
+
+// WIFI
+void connectWiFi() {
+  Serial.print("Conectando ao WiFi");
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.println("WiFi conectado!");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+}
+// TELEMETRIA
+void publishTelemetry() {
+  if (!mqtt.connected()) return;
+
+  JsonDocument doc;
+
+  doc["sw1"] = sw1State;
+  doc["sw2"] = sw2State;
+  doc["box"] = getSelectedBox();
+
+  char buffer[256];
+
+  serializeJson(doc, buffer);
+
+  mqtt.publish(TOPIC_TELEMETRY.c_str(), buffer, true);
+
+  Serial.print("Telemetry: ");
+  Serial.println(buffer);
+}
+
+// ENVIO RFID
+void publishRFID(String uid) {
+  if (!mqtt.connected()) {
+    Serial.println("RFID ignorado: MQTT desconectado.");
+    line2 = "MQTT OFFLINE";
+    updateDisplay();
+    return;
+  }
+
+  requestCounter++;
+
+  pendingRequestId = WiFi.macAddress() + "-" + bootId + "-" + String(requestCounter);
+
+  JsonDocument doc;
+
+  doc["uid"] = uid;
+  doc["box"] = getSelectedBox();
+  doc["sw1"] = sw1State;
+  doc["sw2"] = sw2State;
+  doc["request_id"] = pendingRequestId;
+
+  char buffer[256];
+
+  serializeJson(doc, buffer);
+
+  mqtt.publish(TOPIC_RFID.c_str(), buffer, false);
+
+  Serial.print("RFID enviado: ");
+  Serial.println(buffer);
+
+  line1 = "CARTAO LIDO";
+  line2 = uid;
+  line3 = getSelectedBox();
+
+  updateDisplay();
+}
+
+// RECEBER COMANDOS MQTT
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  Serial.println();
+  Serial.print("Mensagem recebida: ");
+  Serial.println(topic);
+
+  JsonDocument doc;
+
+  DeserializationError error = deserializeJson(doc, payload, length);
+
+  if (error) {
+    Serial.println("Erro no JSON!");
+    return;
+  }
+
+  // ATUALIZAR DISPLAY
+  if (doc["line1"].is<const char*>()) {
+    line1 = doc["line1"].as<String>();
+  }
+
+  if (doc["line2"].is<const char*>()) {
+    line2 = doc["line2"].as<String>();
+  }
+
+  if (doc["line3"].is<const char*>()) {
+    line3 = doc["line3"].as<String>();
+  }
+
+  // VALIDAR RESPOSTA DA SOLICITACAO
+  if (doc["request_id"].is<const char*>()) {
+    String responseId = doc["request_id"].as<String>();
+
+    if (responseId == pendingRequestId && pendingRequestId != "") {
+
+      if (doc["authorized"] == true) {
+
+        if (doc["servo1"].is<int>()) {
+          int angle = doc["servo1"];
+
+          angle = constrain(angle, 0, 180);
+
+          servo1.write(angle);
+          servo1Angle = angle;
+
+          servoOpenAt = millis();
+          servoAberto = true;
+
+          Serial.print("Acesso autorizado. Servo: ");
+          Serial.println(angle);
+        }
+
+      } else {
+        Serial.println("Acesso negado pelo servidor.");
+      }
+
+      pendingRequestId = "";
+    } else {
+      Serial.println("Resposta ignorada: request_id diferente.");
+    }
+  }
+
+  updateDisplay();
+}
+
+// CONECTAR MQTT
+void connectMQTT() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  if (mqtt.connected()) return;
+
+  if (millis() - lastMqttAttempt < 3000) return;
+
+  lastMqttAttempt = millis();
+
+  Serial.print("Conectando MQTT...");
+
+  String clientId = "ESP32C3-";
+  clientId += WiFi.macAddress();
+
+  if (mqtt.connect(clientId.c_str())) {
+
+    Serial.println(" conectado!");
+
+    mqtt.subscribe(TOPIC_COMMAND.c_str());
+
+    sw1State = digitalRead(SW1_PIN);
+    sw2State = digitalRead(SW2_PIN);
+
+    publishTelemetry();
+
+    line1 = "ESP32-C3";
+    line2 = "MQTT CONECTADO";
+    line3 = getSelectedBox();
+
+    updateDisplay();
+
+  } else {
+
+    Serial.print(" falhou. Estado: ");
+    Serial.println(mqtt.state());
+
+  }
+}
+
+// LER SWITCHES
+void readSwitches() {
+  int newSW1 = digitalRead(SW1_PIN);
+  int newSW2 = digitalRead(SW2_PIN);
+
+  if (newSW1 != sw1State || newSW2 != sw2State) {
+
+    sw1State = newSW1;
+    sw2State = newSW2;
+
+    Serial.print("Box selecionado: ");
+    Serial.println(getSelectedBox());
+
+    publishTelemetry();
+
+    line3 = getSelectedBox();
+    updateDisplay();
+  }
+}
+
+// LER RFID
+void readRFID() {
+  if (!rfid.PICC_IsNewCardPresent()) return;
+
+  if (!rfid.PICC_ReadCardSerial()) return;
+
+  String uid = "";
+
+  for (byte i = 0; i < rfid.uid.size; i++) {
+
+    if (rfid.uid.uidByte[i] < 0x10) {
+      uid += "0";
+    }
+
+    uid += String(rfid.uid.uidByte[i], HEX);
+  }
+
+  uid.toUpperCase();
+
+  lastRFID = uid;
+
+  Serial.print("Cartao identificado: ");
+  Serial.println(uid);
+
+  // ENVIAR UID E BOX SELECIONADO
+  publishRFID(uid);
+
+  rfid.PICC_HaltA();
+  rfid.PCD_StopCrypto1();
+}
+
+// SETUP
+void setup() {
+  Serial.begin(115200);
+  bootId = String((uint32_t)esp_random(), HEX);
+
+  // SWITCHES
+  pinMode(SW1_PIN, INPUT_PULLUP);
+  pinMode(SW2_PIN, INPUT_PULLUP);
+
+  // DISPLAY
+  Wire.begin(OLED_SDA, OLED_SCL);
+
+  if (display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+    oledReady = true;
+    updateDisplay();
+  } else {
+    Serial.println("Erro ao inicializar OLED!");
+  }
+
+  // SERVO
+  servo1.setPeriodHertz(50);
+  servo1.attach(SERVO1_PIN, 500, 2400);
+  servo1.write(servo1Angle);
+  // SERVO
+  servo1.setPeriodHertz(50);
+
+  if (servo1.attach(SERVO1_PIN, 500, 2400)) {
+    Serial.println("Servo inicializado!");
+  } else {
+    Serial.println("Erro ao inicializar servo!");
+  }
+
+  servo1.write(servo1Angle);
+
+  // RFID
+  SPI.begin(RFID_SCK, RFID_MISO, RFID_MOSI, RFID_SS);
+  rfid.PCD_Init();
+
+  Serial.println("RFID inicializado!");
+
+  // MQTT
+  mqtt.setServer(MQTT_SERVER, MQTT_PORT);
+  mqtt.setCallback(mqttCallback);
+  mqtt.setBufferSize(512);
+  mqtt.setKeepAlive(30);
+
+  // ESTADOS INICIAIS
+  sw1State = digitalRead(SW1_PIN);
+  sw2State = digitalRead(SW2_PIN);
+
+  // WIFI
+  connectWiFi();
+
+  line1 = "ESP32-C3";
+  line2 = "CONECTANDO WIFI";
+  line3 = getSelectedBox();
+
+  updateDisplay();
+}
+
+// LOOP
+void loop() {
+
+  // VERIFICAR WIFI
+  if (WiFi.status() != WL_CONNECTED) {
+
+    if (millis() - lastWifiAttempt >= 10000) {
+      Serial.println("WiFi desconectado. Tentando novamente...");
+      connectWiFi();
+    }
+
+    line2 = "WIFI OFFLINE";
+    updateDisplay();
+
+  } else {
+
+    // VERIFICAR MQTT
+    connectMQTT();
+
+    if (mqtt.connected()) {
+      mqtt.loop();
+    }
+  }
+
+  // LER COMPONENTES
+  readSwitches();
+  readRFID();
+
+  delay(20);
+  
+  // FECHAR SERVO AUTOMATICAMENTE
+  if (servoAberto && millis() - servoOpenAt >= 3000) {
+    servo1.write(0);
+    servo1Angle = 0;
+    servoAberto = false;
+
+    Serial.println("Servo retornou para posição fechada.");
+  }
+}
